@@ -5,7 +5,7 @@ import _thread as thread
 
 SERVER_NAME = 'localhost'
 BACKLOG = 40
-MAX_RECV_BYTES = 999999
+MAX_RECV_BYTES = 256000
 CLRF = b'\r\n'
 i = 0
 
@@ -43,10 +43,10 @@ def proxy_thread(client_conn: socket.socket, client_address):
     i += 1
     
     # client_conn.settimeout(7)
-    data = client_conn.recv(MAX_RECV_BYTES)
-    print(data)
+    request = client_conn.recv(MAX_RECV_BYTES)
+    print(request)
     
-    first_line = data.split(CLRF)[0]
+    first_line = request.split(CLRF)[0]
     first_line_arr = first_line.split(b' ')
     request_type = first_line_arr[0]
     url =  first_line_arr[1]
@@ -57,29 +57,25 @@ def proxy_thread(client_conn: socket.socket, client_address):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         try:
             s.connect((hostname, port))
-            s.sendall(data)
+            s.sendall(request)
+            # response = b''
             
             while True:
-                data = s.recv(4096)
-                if len(data) > 0:
-                    client_conn.sendall(data)
-                else:
+                try:
+                    s.settimeout(5)
+                    client_conn.sendall(s.recv(4096))
+                    s.settimeout(None)
+                except socket.timeout:
                     break
-            
                 
-            # response = s.recv(MAX_RECV_BYTES)
             # client_conn.sendall(response)
-                
-            # print('closing')
-            s.close()  # s is the socket for talking to target server
-            client_conn.close() # client_conn is socket talking to proxy client
-            # sys.exit(0)
+            client_conn.close() 
+            
         except socket.error as e:
-            print(e, 'closing',j)
+            print(e, j)
             if client_conn:
-                print('sending bad req 400')
                 client_conn.sendall(b"HTTP/1.0 400 Bad Request" + CLRF)
-                # client_conn.close()
+                client_conn.close()
             sys.exit(1)
             
 
