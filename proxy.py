@@ -8,13 +8,15 @@ BACKLOG = 40
 MAX_RECV_BYTES = 256000
 CLRF = b'\r\n'
 REFERER_LOCATOR = b'Referer: '
-DOC_IDENTIFIER = b'Accept: text/html'
+DOC_IDENTIFIER = b'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp'
+IMAGE_IDENTIFIER = b'Accept: image/avif,image/webp'
+SUBSTITUTION = b'GET http://ocna0.d2.comp.nus.edu.sg:50000/change.jpg HTTP/1.0\r\nHost: ocna0.d2.comp.nus.edu.sg:50000\r\n'
 
 STARTED = 'started'
 ENDED = 'ended'
 TOTAL = 'tolal'
 
-connections = set([])
+# connections = set([])
 
 class ProxyException(Exception):
     pass
@@ -23,7 +25,7 @@ class ProxyException(Exception):
 telemetry_store = dict({}) 
 
 def main():
-    i=0
+    print(sys.argv)
     if len(sys.argv) < 2:
         PORT = 8080
         print(f'no port provided, using {8080}')
@@ -45,23 +47,19 @@ def main():
     while True:       
         try:
             connection, client_address = helloSocket.accept()
-            connections.add(connection)
-            print('number of connections:', len(connections))
-            # print(f'connecting to client: {client_address}, connection={i}')
-            i+=1
+            # connections.add(connection)
+            # print('number of connections:', len(connections))
             thread.start_new_thread(proxy_thread, (connection, client_address))
             
         except KeyboardInterrupt:
             helloSocket.shutdown(socket.SHUT_RDWR)
-            for connection in connections:
-                connection.shutdown(socket.SHUT_RDWR)
 
-j = 0
+# j = 0
 
 def proxy_thread(client_conn: socket.socket, client_address):
-    global j
-    thread_no = j
-    j+=1
+    # global j
+    # thread_no = j
+    # j+=1
     while True:
         
         try:
@@ -75,14 +73,12 @@ def proxy_thread(client_conn: socket.socket, client_address):
             
             port, hostname, http_method, url = get_fields(request)
             # print('fields:', port, hostname, http_method, url)
-            
-            print(f'inside thread {thread_no}: receiving for url - {url}')
+            # print(f'inside thread {thread_no}: receiving for url - {url}')
             
             if is_html_request(request):
                 referer = remove_end_slash(url).decode()
             else:
                 referer = remove_end_slash(get_referer(request)).decode()
-            
             
             
             ## log
@@ -93,6 +89,11 @@ def proxy_thread(client_conn: socket.socket, client_address):
             else:
                 telemetry_store[referer][STARTED] += 1
             
+            
+            if sys.argv[2] == '1' and is_image_request(request):
+                hostname, port, request = "ocna0.d2.comp.nus.edu.sg", 50000, modify_req(request)
+            
+            # print('updated request: ', request)
                 
             ## make request on behalf of client
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -142,6 +143,14 @@ def proxy_thread(client_conn: socket.socket, client_address):
             # print('peer reset')
             return
 
+
+def modify_req(request: bytes):
+    start_index = request.find(CLRF, request.find(CLRF) + 4) + 4
+    print(SUBSTITUTION + request[start_index:])
+    return SUBSTITUTION + request[start_index:]
+    
+    
+
 def telemetry_thread(referer: str):
     time.sleep(1)
     if telemetry_store[referer][STARTED] == telemetry_store[referer][ENDED]:
@@ -151,6 +160,9 @@ def telemetry_thread(referer: str):
 
 def is_html_request(request: bytes):
     return request.find(DOC_IDENTIFIER) != -1 and request.find(DOC_IDENTIFIER) < request.find(CLRF + CLRF)
+
+def is_image_request(request: bytes):
+    return request.find(IMAGE_IDENTIFIER) != -1 and request.find(IMAGE_IDENTIFIER) < request.find(CLRF + CLRF)
 
 def get_referer(request: bytes):
     referer_pos = request.find(REFERER_LOCATOR)
