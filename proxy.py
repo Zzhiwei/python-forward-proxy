@@ -14,6 +14,7 @@ STARTED = 'started'
 ENDED = 'ended'
 TOTAL = 'tolal'
 
+connections = set([])
 
 class ProxyException(Exception):
     pass
@@ -44,18 +45,25 @@ def main():
     while True:       
         try:
             connection, client_address = helloSocket.accept()
+            connections.add(connection)
+            print('number of connections:', len(connections))
             # print(f'connecting to client: {client_address}, connection={i}')
-            print(f'connection={i}')
             i+=1
             thread.start_new_thread(proxy_thread, (connection, client_address))
+            
         except KeyboardInterrupt:
             helloSocket.shutdown(socket.SHUT_RDWR)
+            for connection in connections:
+                connection.shutdown(socket.SHUT_RDWR)
 
+j = 0
 
 def proxy_thread(client_conn: socket.socket, client_address):
-    j = 0
+    global j
+    thread_no = j
+    j+=1
     while True:
-        print(f'{j}: receive from {client_address}')
+        
         try:
             ## using while true will lead to diff websites using same TCP connection
             ## (firefox uses same network client process even for different websites?)
@@ -67,6 +75,8 @@ def proxy_thread(client_conn: socket.socket, client_address):
             
             port, hostname, http_method, url = get_fields(request)
             # print('fields:', port, hostname, http_method, url)
+            
+            print(f'inside thread {thread_no}: receiving for url - {url}')
             
             if is_html_request(request):
                 referer = remove_end_slash(url).decode()
@@ -119,19 +129,24 @@ def proxy_thread(client_conn: socket.socket, client_address):
                     telemetry_store[referer][ENDED] += 1
                     # print(telemetry_store)
                     if telemetry_store[referer][STARTED] == telemetry_store[referer][ENDED]:
-                        time.sleep(5)
-                        if telemetry_store[referer][STARTED] == telemetry_store[referer][ENDED]:
-                            print(referer, '\t', telemetry_store[referer][TOTAL])
-                            del telemetry_store[referer]
+                        # time out wait to check no more requests from website
+                        thread.start_new_thread(telemetry_thread, (referer,))
+                        
                 except socket.error as e:
                     print(e)
                     send_error_response(str(e), client_conn)
         
         except ProxyException as e:
             send_error_response(str(e), client_conn)
-        # finally:
-        #     client_conn.close()
-    
+        except ConnectionResetError as e:
+            # print('peer reset')
+            return
+
+def telemetry_thread(referer: str):
+    time.sleep(1)
+    if telemetry_store[referer][STARTED] == telemetry_store[referer][ENDED]:
+        print(referer, '\t', telemetry_store[referer][TOTAL])
+        del telemetry_store[referer]
             
 
 def is_html_request(request: bytes):
