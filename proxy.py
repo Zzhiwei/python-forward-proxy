@@ -2,10 +2,12 @@ import os,sys,time, socket, select
 import _thread as thread
 
 
-
+# configs
 SERVER_NAME = ''
 BACKLOG = 40
 MAX_RECV_BYTES = 256000
+
+# constants
 CLRF = b'\r\n'
 REFERER_LOCATOR = b'Referer: '
 DOC_IDENTIFIER = b'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp'
@@ -16,6 +18,10 @@ STARTED = 'started'
 ENDED = 'ended'
 TOTAL = 'tolal'
 
+ATTACK_HTML = b'<html><head><title>You are being attacked</title></head><body><center><h1>You are being attacked</h1></center></body></html>'
+PORT = IS_FLAG = ATK_FLAG = None
+
+
 # connections = set([])
 
 class ProxyException(Exception):
@@ -25,12 +31,19 @@ class ProxyException(Exception):
 telemetry_store = dict({}) 
 
 def main():
-    print(sys.argv)
-    if len(sys.argv) < 2:
-        PORT = 8080
-        print(f'no port provided, using {8080}')
+    global IS_FLAG, ATK_FLAG
+    if len(sys.argv) < 4:
+        print('ERROR: missing arguments')
+        sys.exit(1)
     else:
-        PORT = int(sys.argv[1])
+        try:
+            PORT = int(sys.argv[1])
+            IS_FLAG = int(sys.argv[2])
+            ATK_FLAG = int(sys.argv[3])
+        except ValueError:
+            print('ERROR: invalid argument types, please enter numbers')
+            sys.exit(1)
+        
         
     try:
         helloSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -70,6 +83,12 @@ def proxy_thread(client_conn: socket.socket, client_address):
             if not len(request): 
                 client_conn.close()
                 return
+
+            if ATK_FLAG:
+                print('sending attack')
+                send_attack_message(client_conn)
+                client_conn.close()
+                return 
             
             port, hostname, http_method, url = get_fields(request)
             # print('fields:', port, hostname, http_method, url)
@@ -90,10 +109,8 @@ def proxy_thread(client_conn: socket.socket, client_address):
                 telemetry_store[referer][STARTED] += 1
             
             
-            if sys.argv[2] == '1' and is_image_request(request):
+            if IS_FLAG and is_image_request(request):
                 hostname, port, request = "ocna0.d2.comp.nus.edu.sg", 50000, modify_req(request)
-            
-            # print('updated request: ', request)
                 
             ## make request on behalf of client
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -144,9 +161,16 @@ def proxy_thread(client_conn: socket.socket, client_address):
             return
 
 
+
+def send_attack_message(conn: socket.socket):
+    conn.send(b'HTTP/1.0 200 OK' + CLRF)
+    conn.send(b'Content-Type: text/html' + CLRF + CLRF)
+    conn.send(ATTACK_HTML) 
+    print('finished sending attk')
+
+
 def modify_req(request: bytes):
     start_index = request.find(CLRF, request.find(CLRF) + 4) + 4
-    print(SUBSTITUTION + request[start_index:])
     return SUBSTITUTION + request[start_index:]
     
     
@@ -154,7 +178,7 @@ def modify_req(request: bytes):
 def telemetry_thread(referer: str):
     time.sleep(1)
     if telemetry_store[referer][STARTED] == telemetry_store[referer][ENDED]:
-        print(referer, '\t', telemetry_store[referer][TOTAL])
+        print(f'{referer}, ', telemetry_store[referer][TOTAL])
         del telemetry_store[referer]
             
 
@@ -233,10 +257,3 @@ if __name__ == '__main__':
    
 
 
-""" this won't work (long time to load first image)
-d = s.recv(2048)
-if len(d):
-    client_conn.sendall(d)
-else:
-    break
-"""
