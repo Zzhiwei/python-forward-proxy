@@ -10,12 +10,17 @@ CLRF = b'\r\n'
 REFERER_LOCATOR = b'Referer: '
 DOC_IDENTIFIER = b'Accept: text/html'
 
+STARTED = 'started'
+ENDED = 'ended'
+TOTAL = 'tolal'
+
+
 class ProxyException(Exception):
     pass
 
-
 # value: first number is opened connection, second is closed connection
-referer_db = dict({ 'dummy': [0, 0] }) 
+telemetry_store = dict({ 'dummy': [0, 0] }) 
+
 def main():
     i=0
     if len(sys.argv) < 2:
@@ -39,7 +44,8 @@ def main():
     while True:       
         try:
             connection, client_address = helloSocket.accept()
-            print(f'connecting to client: {client_address}, connection={i}')
+            # print(f'connecting to client: {client_address}, connection={i}')
+            print(f'connection={i}')
             i+=1
             thread.start_new_thread(proxy_thread, (connection, client_address))
         except KeyboardInterrupt:
@@ -47,69 +53,81 @@ def main():
 
 
 def proxy_thread(client_conn: socket.socket, client_address):
-    try:
-        referers = {}
-        ## using while true will lead to diff websites using same TCP connection
-        ## (firefox uses same network client process even for different websites?)
-        # while True: 
-        request = client_conn.recv(MAX_RECV_BYTES) # get client request
-        if not len(request): 
-            client_conn.close()
-            return
-        
-        port, hostname, http_method, url = get_fields(request)
-        # print('fields:', port, hostname, http_method, url)
-        
-        if is_html_request(request):
-            referer = remove_end_slash(url)
-        else:
-            referer = remove_end_slash(get_referer(request))
-        
-        if referer not in referers:
-            referers[referer] = 0 # init 0 bytes
+    while True:
+        try:
+            ## using while true will lead to diff websites using same TCP connection
+            ## (firefox uses same network client process even for different websites?)
+            request = client_conn.recv(MAX_RECV_BYTES)
+
+            if not len(request): 
+                client_conn.close()
+                return
             
-        
-        print(http_method.decode(),'\t',f'hostname={hostname.decode()}','\t',f'url={url.decode()}', '\t', f'referer={referer.decode()}')
+            port, hostname, http_method, url = get_fields(request)
+            # print('fields:', port, hostname, http_method, url)
             
-        ## make request on behalf of client
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            try:
-                s.connect((hostname, port))
-                s.sendall(request)
-                in_body = False
-                header = b''
-                payload_len = 0
+            if is_html_request(request):
+                referer = remove_end_slash(url).decode()
+            else:
+                referer = remove_end_slash(get_referer(request)).decode()
+            
+            
+            
+            ## log
+            # print(http_method.decode(),'\t',f'hostname={hostname.decode()}','\t',f'url={url.decode()}', '\t', f'referer={referer}')
+
+            if not telemetry_store.get(referer):
+                telemetry_store[referer] = {STARTED: 1, ENDED: 0, TOTAL: 0}
+            else:
+                telemetry_store[referer][STARTED] += 1
+            
                 
-                while True:
-                    try:
-                        s.settimeout(5)
-                        if not in_body:
-                            header += s.recv(8)
-                            header_end_pos = header.find(CLRF+CLRF)
-                            if header_end_pos != -1:
-                                payload_len += len(header[header_end_pos+4:])
-                                client_conn.sendall(header)
-                                in_body = True
-                        else:
-                            content = s.recv(4096)
-                            size = len(content)
-                            if size:
-                                payload_len += size
-                                client_conn.sendall(content)
-                            s.settimeout(None)
-                    except socket.timeout:
-                        break
+            ## make request on behalf of client
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                try:
+                    s.connect((hostname, port))
+                    s.sendall(request)
+                    in_body = False
+                    header = b''
+                    payload_len = 0
                     
-                print(payload_len)
-            
-            except socket.error as e:
-                print(e)
-                send_error_response(str(e), client_conn)
-    
-    except ProxyException as e:
-        send_error_response(str(e), client_conn)
-    finally:
-        client_conn.close()
+                    while True:
+                        try:
+                            s.settimeout(5)
+                            if not in_body:
+                                header += s.recv(8)
+                                header_end_pos = header.find(CLRF+CLRF)
+                                if header_end_pos != -1:
+                                    payload_len += len(header[header_end_pos+4:])
+                                    client_conn.sendall(header)
+                                    in_body = True
+                            else:
+                                content = s.recv(4096)
+                                size = len(content)
+                                if size:
+                                    payload_len += size
+                                    client_conn.sendall(content)
+                            s.settimeout(None)
+                        except socket.timeout:
+                            break
+                        
+                    
+                    # print(f'payload_len:', payload_len)
+                    telemetry_store[referer][TOTAL] += payload_len
+                    telemetry_store[referer][ENDED] += 1
+                    if telemetry_store[referer][STARTED] == telemetry_store[referer][ENDED]:
+                        time.sleep(0.3)
+                        if telemetry_store[referer][STARTED] == telemetry_store[referer][ENDED]:
+                            print(referer, '\t', telemetry_store[referer][TOTAL])
+                            del telemetry_store[referer]
+                except socket.error as e:
+                    print(e)
+                    send_error_response(str(e), client_conn)
+        
+        except ProxyException as e:
+            send_error_response(str(e), client_conn)
+        # finally:
+        #     client_conn.close()
     
             
 
