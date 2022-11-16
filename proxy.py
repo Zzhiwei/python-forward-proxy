@@ -13,8 +13,8 @@ DOC_IDENTIFIER = b'Accept: text/html'
 
 # value: first number is opened connection, second is closed connection
 referer_db = dict({ 'dummy': [0, 0] }) 
-
 def main():
+    i=0
     if len(sys.argv) < 2:
         print('no port provided, using 8080')
         PORT = 8080
@@ -36,21 +36,22 @@ def main():
     while True:       
         try:
             connection, client_address = helloSocket.accept()
-            print(f'connecting to client: {client_address}')
+            print(f'connecting to client: {client_address}, connection={i}')
+            i+=1
             thread.start_new_thread(proxy_thread, (connection, client_address))
         except KeyboardInterrupt:
             helloSocket.shutdown(socket.SHUT_WR)
 
-i = 0    
+
 def proxy_thread(client_conn: socket.socket, client_address):
     referers = {}
-    while True: # keep listening on this connection
+    # keeping this will lead to diff websites using same TCP connection
+    # (firefox uses same network client process even for different websites?)
+    while True: 
         request = client_conn.recv(MAX_RECV_BYTES) # get client request
         if not len(request): 
-            print('disconnecting', i)
-            i+=1
             client_conn.close()
-            break
+            return
         
         port, hostname, http_method, url = get_fields(request)
         # get origin
@@ -59,7 +60,8 @@ def proxy_thread(client_conn: socket.socket, client_address):
         else:
             referer = remove_end_slash(get_referer(request))
         
-        if referer not in ree:
+        if referer not in referers:
+            referers[referer] = 0 # init 0 bytes
             
         
         print(http_method.decode(),'\t',url.decode(), '\t', f'referer={referer.decode()}')
@@ -69,21 +71,35 @@ def proxy_thread(client_conn: socket.socket, client_address):
             try:
                 s.connect((hostname, port))
                 s.sendall(request)
+                in_body = False
+                header = b''
+                payload_len = 0
                 
                 while True:
                     try:
                         s.settimeout(5)
-                        client_conn.sendall(s.recv(2048))
+                        if not in_body:
+                            header += s.recv(8)
+                            header_end_pos = header.find(CLRF+CLRF)
+                            payload_len += len(header[header_end_pos+8:])
+                            client_conn.sendall(header)
+                            in_body = False
+                        else:
+                            content = s.recv(4096)
+                            size = len(content)
+                            if size:
+                                payload_len += size
+                                client_conn.sendall(content)
                         s.settimeout(None)
                     except socket.timeout:
                         break
                 
             except socket.error as e:
                 print(e)
-                if client_conn:
-                    client_conn.sendall(b"HTTP/1.0 400 Bad Request" + CLRF)
-                    client_conn.close()
-                sys.exit(1)
+                client_conn.sendall(b"HTTP/1.0 400 Bad Request" + CLRF)
+            
+    # client_conn.close()
+    # sys.exit(0)
             
 
 def get_referer(request: bytes):
