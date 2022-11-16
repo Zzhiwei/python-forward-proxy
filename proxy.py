@@ -3,7 +3,7 @@ import _thread as thread
 
 
 
-SERVER_NAME = 'localhost'
+SERVER_NAME = ''
 BACKLOG = 40
 MAX_RECV_BYTES = 256000
 CLRF = b'\r\n'
@@ -19,13 +19,13 @@ class ProxyException(Exception):
     pass
 
 # value: first number is opened connection, second is closed connection
-telemetry_store = dict({ 'dummy': [0, 0] }) 
+telemetry_store = dict({}) 
 
 def main():
     i=0
     if len(sys.argv) < 2:
-        print('no port provided, using 8080')
         PORT = 8080
+        print(f'no port provided, using {8080}')
     else:
         PORT = int(sys.argv[1])
         
@@ -53,7 +53,9 @@ def main():
 
 
 def proxy_thread(client_conn: socket.socket, client_address):
+    j = 0
     while True:
+        print(f'{j}: receive from {client_address}')
         try:
             ## using while true will lead to diff websites using same TCP connection
             ## (firefox uses same network client process even for different websites?)
@@ -115,8 +117,9 @@ def proxy_thread(client_conn: socket.socket, client_address):
                     # print(f'payload_len:', payload_len)
                     telemetry_store[referer][TOTAL] += payload_len
                     telemetry_store[referer][ENDED] += 1
+                    # print(telemetry_store)
                     if telemetry_store[referer][STARTED] == telemetry_store[referer][ENDED]:
-                        time.sleep(0.3)
+                        time.sleep(5)
                         if telemetry_store[referer][STARTED] == telemetry_store[referer][ENDED]:
                             print(referer, '\t', telemetry_store[referer][TOTAL])
                             del telemetry_store[referer]
