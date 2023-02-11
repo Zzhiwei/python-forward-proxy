@@ -50,16 +50,12 @@ def main():
     while True:       
         try:
             connection, client_address = helloSocket.accept()
-            # print('added new connection')
             thread.start_new_thread(proxy_thread, (connection, client_address))
         except KeyboardInterrupt:
             helloSocket.close()
 
-# i = 0
+
 def proxy_thread(client_conn: socket.socket, client_address):
-    # global i
-    # tn = i
-    # i+=1
     timeout_count = 0
     while True:
         try:
@@ -83,7 +79,7 @@ def proxy_thread(client_conn: socket.socket, client_address):
             else:
                 referer = remove_end_slash(get_referer(request)).decode()
             
-            ## log
+            # log
             # print(http_method.decode(),'\t',f'hostname={hostname.decode()}', '\t', f'port={port}','\t',f'url={url.decode()}', '\t', f'referer={referer}')
 
             if not telemetry_store.get(referer):
@@ -95,7 +91,7 @@ def proxy_thread(client_conn: socket.socket, client_address):
             if IS_FLAG and is_image_request(request):
                 hostname, port, request = "ocna0.d2.comp.nus.edu.sg", 50000, modify_req(request)
                 
-            ## make request on behalf of client
+            # make request on behalf of client
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 try:
                     s.connect((hostname, port))
@@ -138,7 +134,6 @@ def proxy_thread(client_conn: socket.socket, client_address):
         except socket.timeout:
             timeout_count += 1
             if timeout_count > 3:
-                # print('closing conn due to no usage:', tn)
                 client_conn.close()
                 break
         except ProxyException as e:
